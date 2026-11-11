@@ -1,0 +1,1 @@
+Polymarket price-ladder events (for example "What price will Bitcoin hit in November?") now label each outcome with its own strike or range ("dip to $72,500: 84%") instead of collapsing every outcome to the subject name ("Bitcoin: 84%"), and show the event title rather than an unrelated sub-market question next to the odds.

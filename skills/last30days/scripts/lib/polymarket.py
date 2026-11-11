@@ -610,6 +610,39 @@ def _shorten_question(question: str) -> str:
     return re.sub(r"^(?:a|an|the)\s+", "", text, flags=re.I)
 
 
+def _distinct_outcome_labels(questions: List[str]) -> List[str]:
+    """Build display labels for a group of sub-market questions.
+
+    Uses ``_shorten_question`` when that yields a unique label per question
+    (e.g. one team per NCAA market). Threshold/range ladders such as
+    "Will Bitcoin dip to $45,000 by December 31?" all shorten to "Bitcoin",
+    which would make every odds entry indistinguishable — in that case keep
+    only the words that differ between questions (the strike or range).
+    """
+    shortened = [_shorten_question(q) for q in questions]
+    if len(set(s.lower() for s in shortened)) == len(shortened):
+        return shortened
+
+    token_lists = [q.strip().rstrip("?").split() for q in questions]
+    prefix = 0
+    while all(len(t) > prefix for t in token_lists) and len(
+        {t[prefix].lower() for t in token_lists}
+    ) == 1:
+        prefix += 1
+    suffix = 0
+    while all(len(t) > prefix + suffix for t in token_lists) and len(
+        {t[-1 - suffix].lower() for t in token_lists}
+    ) == 1:
+        suffix += 1
+
+    labels = []
+    for q, tokens in zip(questions, token_lists):
+        middle = tokens[prefix:len(tokens) - suffix] if suffix else tokens[prefix:]
+        label = " ".join(middle).strip()
+        labels.append(label or _shorten_question(q))
+    return labels
+
+
 def _compute_text_similarity(topic: str, title: str, outcomes: List[str] = None) -> float:
     """Score how well the event title (or outcome names) match the search topic.
 
@@ -775,6 +808,7 @@ def parse_polymarket_response(
         # sub-markets, synthesize from market questions to show actual
         # team/entity probabilities instead of a single market's Yes/No
         outcome_prices = _parse_outcome_prices(top_market)
+        display_question = top_market.get("question", title)
         top_outcomes_are_binary = (
             len(outcome_prices) == 2
             and {n.lower() for n, _ in outcome_prices} == {"yes", "no"}
@@ -791,7 +825,14 @@ def parse_polymarket_response(
                     synth_outcomes.append((q, yes_price))
             if synth_outcomes:
                 synth_outcomes.sort(key=lambda x: x[1], reverse=True)
-                outcome_prices = [(_shorten_question(q), p) for q, p in synth_outcomes]
+                labels = _distinct_outcome_labels([q for q, _ in synth_outcomes])
+                outcome_prices = [
+                    (label, p) for label, (_, p) in zip(labels, synth_outcomes)
+                ]
+                # The odds now span every sub-market, so the top-volume
+                # sub-market's question no longer describes them; show the
+                # event title instead.
+                display_question = title
 
         # Format price movement
         price_movement = _format_price_movement(top_market)
@@ -881,7 +922,7 @@ def parse_polymarket_response(
         items.append({
             "event_id": event_id,
             "title": title,
-            "question": top_market.get("question", title),
+            "question": display_question,
             "url": url,
             "outcome_prices": top_outcomes,
             "outcomes_remaining": remaining,

@@ -656,3 +656,65 @@ def test_per_item_relevance_floor_no_drops_when_all_high():
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# === Tests for threshold-ladder events (distinct outcome labels) ===
+
+
+def test_distinct_outcome_labels_keeps_unique_shortened_names():
+    """Team-style questions still shorten to the entity name."""
+    labels = polymarket._distinct_outcome_labels([
+        "Will Arizona win the NCAA Tournament?",
+        "Will Duke win the NCAA Tournament?",
+    ])
+    assert labels == ["Arizona", "Duke"]
+
+
+def test_distinct_outcome_labels_keeps_strike_for_threshold_ladders():
+    """Questions that only differ by price keep the price, not 'Bitcoin'."""
+    labels = polymarket._distinct_outcome_labels([
+        "Will Bitcoin dip to $45,000 by December 31, 2026?",
+        "Will Bitcoin dip to $65,000 by December 31, 2026?",
+        "Will Bitcoin reach $100,000 by December 31, 2026?",
+    ])
+    assert labels == ["dip to $45,000", "dip to $65,000", "reach $100,000"]
+    assert len(set(labels)) == 3
+
+
+def test_parse_threshold_ladder_event_labels_and_question():
+    """A multi-market price ladder must pair each strike with its own odds and
+    show the event title, not the top-volume sub-market's question."""
+    markets = [
+        create_mock_market(
+            market_id="m1",
+            question="Will Bitcoin dip to $72,500 in November?",
+            prices='["0.82", "0.18"]',
+            volume="900000",
+        ),
+        create_mock_market(
+            market_id="m2",
+            question="Will Bitcoin dip to $65,000 in November?",
+            prices='["0.30", "0.70"]',
+            volume="500000",
+        ),
+        create_mock_market(
+            market_id="m3",
+            question="Will Bitcoin reach $90,000 in November?",
+            prices='["0.05", "0.95"]',
+            volume="2000000",
+        ),
+    ]
+    response = {"events": [create_mock_event(
+        title="What price will Bitcoin hit in November?",
+        markets=markets,
+    )]}
+
+    items = polymarket.parse_polymarket_response(response, topic="bitcoin price")
+
+    assert len(items) == 1
+    item = items[0]
+    assert item["question"] == "What price will Bitcoin hit in November?"
+    odds = dict(item["outcome_prices"])
+    assert odds["dip to $72,500"] == pytest.approx(0.82)
+    assert odds["dip to $65,000"] == pytest.approx(0.30)
+    assert odds["reach $90,000"] == pytest.approx(0.05)
